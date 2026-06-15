@@ -28,11 +28,12 @@ PATH_MODEL_TRUST_SHIELD = MODEL_DIR / "hukum_trust_shield_classifier.pkl"
 PATH_PRICING_COLUMNS = MODEL_DIR / "hukum_pricing_features.pkl"
 
 import logging
+
 # Configure standard logger
 logging.basicConfig(
     filename=str(LOGS_FILE),
     level=logging.ERROR,
-    format='%(asctime)s %(levelname)s [%(name)s] %(message)s'
+    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
 )
 logger = logging.getLogger("hukum_chatbot")
 
@@ -63,8 +64,10 @@ INTENT_KEYWORDS = {
         "material",
     ],
     "matchmaking": [
-        "find",
-        "worker",
+        "find worker",
+        "need worker",
+        "hire worker",
+        "looking for worker",
         "builder",
         "mason",
         "electrician",
@@ -74,15 +77,17 @@ INTENT_KEYWORDS = {
     ],
     "trust": [
         "risk",
-        "risk status",
-        "trust",
+        "high risk",
+        "low risk",
+        "risk score",
+        "risk level",
+        "safety",
         "fraud",
-        "block",
         "scam",
-        "report",
-        "fake",
         "suspicious",
         "verification",
+        "verified",
+        "trust score",
     ],
 }
 

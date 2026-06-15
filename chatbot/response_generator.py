@@ -9,8 +9,13 @@ Completely independent of Streamlit or UI frameworks.
 import logging
 import re
 from .config import LOGS_FILE
+import pandas as pd
 
-logging.basicConfig(filename=LOGS_FILE, level=logging.ERROR, format='%(asctime)s %(levelname)s %(message)s')
+logging.basicConfig(
+    filename=LOGS_FILE,
+    level=logging.ERROR,
+    format="%(asctime)s %(levelname)s %(message)s",
+)
 import numpy as np
 from . import data_access, models
 from .config import (
@@ -90,7 +95,7 @@ def generate_matchmaking_response(query: str, session_id: str = "default") -> st
 
     probabilities = model_matchmaker.predict_proba(features_input)[:, 1]
 
-# random shit
+    # random shit
     print("\n===== MATCH DEBUG =====")
     print(probabilities[:10])
     print("MIN =", probabilities.min())
@@ -113,6 +118,7 @@ def generate_matchmaking_response(query: str, session_id: str = "default") -> st
 
     # Store context for follow-up detection
     from . import memory_manager
+
     recommended_workers = []
     for _, row in top_matches.iterrows():
         worker_dict = row.to_dict()
@@ -121,10 +127,13 @@ def generate_matchmaking_response(query: str, session_id: str = "default") -> st
                 worker_dict[k] = v.item()
         recommended_workers.append(worker_dict)
 
-    memory_manager.update_context(session_id, {
-        "recommended_workers": recommended_workers,
-        "selected_worker": recommended_workers[0] if recommended_workers else None
-    })
+    memory_manager.update_context(
+        session_id,
+        {
+            "recommended_workers": recommended_workers,
+            "selected_worker": recommended_workers[0] if recommended_workers else None,
+        },
+    )
 
     # Generate HTML response
     html_layout = f"""
@@ -278,6 +287,7 @@ def generate_trust_response(query: str) -> str:
     Returns:
         str: HTML formatted response with risk assessment
     """
+
     try:
         df_workers = data_access.get_workers_data()
     except Exception as e:
@@ -286,7 +296,21 @@ def generate_trust_response(query: str) -> str:
     query_lower = query.lower()
     matched_row = None
 
-    # Find worker by name
+    query_lower = query.lower()
+
+    # -------------------------------
+    # CASE 1: RISK / TRUST FILTER QUERY
+    # -------------------------------
+    risk_keywords = ["risk", "fraud", "suspicious", "high risk", "low risk"]
+
+    if any(k in query_lower for k in risk_keywords):
+        return generate_risk_filtered_response(df_workers, query_lower)
+
+    # -------------------------------
+    # CASE 2: NAME BASED LOOKUP ONLY
+    # -------------------------------
+    matched_row = None
+
     for _, row in df_workers.iterrows():
         if row["w_name"].lower() in query_lower:
             matched_row = row
@@ -376,6 +400,111 @@ def generate_general_response() -> str:
         str: Markdown formatted welcome text
     """
     return RESPONSE_GENERAL
+
+
+def generate_risk_filtered_response(df_workers, query_lower):
+
+    model = models.get_trust_shield_model()
+
+    input_df = pd.DataFrame(
+        {
+            "w_rating": df_workers["w_rating"],
+            "disputes_logged": 0,
+            "w_is_verified": df_workers["w_is_verified"],
+        }
+    )
+
+    risk_probs = model.predict_proba(input_df)[:, 1]
+
+    df_workers = df_workers.copy()
+    df_workers["risk_score"] = risk_probs
+
+    # -------------------------
+    # PROPER FILTER LOGIC
+    # -------------------------
+    if "low risk" in query_lower:
+        filtered = df_workers[df_workers["risk_score"] <= TRUST_SHIELD_RISK_THRESHOLD]
+
+    elif "high risk" in query_lower:
+        filtered = df_workers[df_workers["risk_score"] > TRUST_SHIELD_RISK_THRESHOLD]
+
+    else:
+        filtered = df_workers.sort_values(by="risk_score", ascending=False)
+
+    # -------------------------
+    # HTML OUTPUT
+    # -------------------------
+    html = """
+    <div style="
+        background: #111827;
+        padding: 12px;
+        border-radius: 10px;
+        color: #ffffff;
+        font-family: Arial;
+        margin-bottom: 10px;
+        border: 1px solid #2d3748;
+    ">
+        <h3 style="margin: 0; color: #60a5fa;">⚠️ Risk Analysis Results</h3>
+        <p style="margin: 4px 0 0; font-size: 12px; color: #cbd5e1;">
+            AI-powered worker risk profiling dashboard
+        </p>
+    </div>
+    """
+
+    for _, row in filtered.head(10).iterrows():
+
+        risk_pct = int(row["risk_score"] * 100)
+
+        if risk_pct > 70:
+            border = "#ef4444"
+            badge = "HIGH RISK"
+            bg = "#1f1f1f"
+        elif risk_pct > 40:
+            border = "#f59e0b"
+            badge = "MEDIUM RISK"
+            bg = "#1a1a1a"
+        else:
+            border = "#22c55e"
+            badge = "LOW RISK"
+            bg = "#0f172a"
+
+        html += f"""
+        <div style="
+            background: {bg};
+            border-left: 5px solid {border};
+            padding: 12px;
+            margin: 10px 0;
+            border-radius: 8px;
+            color: #e5e7eb;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+        ">
+
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <div style="font-size: 15px; font-weight: bold;">
+                    👤 {row['w_name']}
+                </div>
+
+                <div style="
+                    background:{border};
+                    color:white;
+                    padding: 3px 8px;
+                    border-radius: 6px;
+                    font-size: 11px;
+                    font-weight: bold;
+                ">
+                    {badge}
+                </div>
+            </div>
+
+            <div style="margin-top: 6px; font-size: 13px; color: #cbd5e1;">
+                ⭐ Rating: {row['w_rating']} &nbsp; | &nbsp;
+                ⚠️ Risk Score: {risk_pct}%
+            </div>
+
+        </div>
+        """
+
+    return html
 
 
 def format_response(intent: str, query: str, session_id: str = "default") -> dict:
