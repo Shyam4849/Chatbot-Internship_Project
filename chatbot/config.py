@@ -27,13 +27,14 @@ PATH_MODEL_PRICING = MODEL_DIR / "hukum_pricing_regressor.pkl"
 PATH_MODEL_TRUST_SHIELD = MODEL_DIR / "hukum_trust_shield_classifier.pkl"
 PATH_PRICING_COLUMNS = MODEL_DIR / "hukum_pricing_features.pkl"
 
-# DEBUG (temporary)
-print("\n========== PATH DEBUG ==========")
-print("CURRENT DIR:", os.getcwd())
-print("BASE_DIR:", BASE_DIR)
-print("DATASET PATH:", MASTER_EXCEL_PATH)
-print("DATASET EXISTS:", MASTER_EXCEL_PATH.exists())
-print("================================\n")
+import logging
+# Configure standard logger
+logging.basicConfig(
+    filename=str(LOGS_FILE),
+    level=logging.ERROR,
+    format='%(asctime)s %(levelname)s [%(name)s] %(message)s'
+)
+logger = logging.getLogger("hukum_chatbot")
 
 # =====================================================================
 # GEOGRAPHIC DEFAULTS
