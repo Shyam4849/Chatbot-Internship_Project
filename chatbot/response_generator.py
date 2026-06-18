@@ -299,15 +299,7 @@ def generate_trust_response(query: str) -> str:
     query_lower = query.lower()
 
     # -------------------------------
-    # CASE 1: RISK / TRUST FILTER QUERY
-    # -------------------------------
-    risk_keywords = ["risk", "fraud", "suspicious", "high risk", "low risk"]
-
-    if any(k in query_lower for k in risk_keywords):
-        return generate_risk_filtered_response(df_workers, query_lower)
-
-    # -------------------------------
-    # CASE 2: NAME BASED LOOKUP ONLY
+    # STEP 1: CHECK IF A WORKER NAME IS PRESENT
     # -------------------------------
     matched_row = None
 
@@ -316,7 +308,24 @@ def generate_trust_response(query: str) -> str:
             matched_row = row
             break
 
-    # Worker not found
+    # If a worker name is found,
+    # generate individual trust report
+    if matched_row is not None:
+        target_name = matched_row["w_name"]
+        rating = matched_row["w_rating"]
+        verified = matched_row["w_is_verified"]
+
+    # -------------------------------
+    # STEP 2: GENERIC RISK QUERIES
+    # -------------------------------
+    risk_keywords = ["high risk", "low risk", "fraud", "suspicious"]
+
+    if any(k in query_lower for k in risk_keywords):
+        return generate_risk_filtered_response(df_workers, query_lower)
+
+    # -------------------------------
+    # STEP 3: WORKER NOT FOUND
+    # -------------------------------
     if matched_row is None:
         return RESPONSE_WORKER_NOT_FOUND
 
