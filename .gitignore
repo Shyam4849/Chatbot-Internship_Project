@@ -16,4 +16,6 @@ chatbot_logs.txt
 
 *.pkl
 
+*.log
+
 dataset/

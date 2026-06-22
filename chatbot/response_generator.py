@@ -9,8 +9,13 @@ Completely independent of Streamlit or UI frameworks.
 import logging
 import re
 from .config import LOGS_FILE
+import pandas as pd
 
-logging.basicConfig(filename=LOGS_FILE, level=logging.ERROR, format='%(asctime)s %(levelname)s %(message)s')
+logging.basicConfig(
+    filename=LOGS_FILE,
+    level=logging.ERROR,
+    format="%(asctime)s %(levelname)s %(message)s",
+)
 import numpy as np
 from . import data_access, models
 from .config import (
@@ -90,7 +95,7 @@ def generate_matchmaking_response(query: str, session_id: str = "default") -> st
 
     probabilities = model_matchmaker.predict_proba(features_input)[:, 1]
 
-# random shit
+    # random shit
     print("\n===== MATCH DEBUG =====")
     print(probabilities[:10])
     print("MIN =", probabilities.min())
@@ -113,6 +118,7 @@ def generate_matchmaking_response(query: str, session_id: str = "default") -> st
 
     # Store context for follow-up detection
     from . import memory_manager
+
     recommended_workers = []
     for _, row in top_matches.iterrows():
         worker_dict = row.to_dict()
@@ -121,10 +127,13 @@ def generate_matchmaking_response(query: str, session_id: str = "default") -> st
                 worker_dict[k] = v.item()
         recommended_workers.append(worker_dict)
 
-    memory_manager.update_context(session_id, {
-        "recommended_workers": recommended_workers,
-        "selected_worker": recommended_workers[0] if recommended_workers else None
-    })
+    memory_manager.update_context(
+        session_id,
+        {
+            "recommended_workers": recommended_workers,
+            "selected_worker": recommended_workers[0] if recommended_workers else None,
+        },
+    )
 
     # Generate HTML response
     html_layout = f"""
@@ -266,6 +275,73 @@ def generate_pricing_response(query: str) -> str:
     return html_layout
 
 
+def _get_dispute_counts():
+    """
+    Load dispute (report) counts for all workers from the reports sheet.
+
+    Returns:
+        pd.Series: Indexed by w_id, values are integer dispute counts.
+    """
+    try:
+        df_rep = data_access.get_worker_reports_data()
+        counts = (
+            df_rep[df_rep["reported_user_type"] == "Worker"]
+            .groupby("reported_user_id")
+            .size()
+        )
+        return counts
+    except Exception:
+        return pd.Series(dtype=int)
+
+
+def calculate_worker_risk(worker_row, dispute_count=0, worker_name="?"):
+    """
+    Single source of truth for Trust Shield risk calculation.
+
+    Accepts a worker row (Series or dict-like) and a dispute count,
+    builds the correct 3-feature input vector, and returns the model's
+    probability of being high-risk.
+
+    Args:
+        worker_row: Must contain keys 'w_rating' and 'w_is_verified'.
+        dispute_count: Integer number of historical disputes.
+        worker_name: Optional name for debug output.
+
+    Returns:
+        float: Risk probability between 0.0 and 1.0.
+    """
+    model = models.get_trust_shield_model()
+
+    print("MODEL TYPE =", type(model))
+    print("MODEL ID =", id(model))
+    print("FEATURES EXPECTED =", model.feature_names_in_)
+
+    rating = worker_row["w_rating"]
+    verified = worker_row["w_is_verified"]
+
+    input_df = pd.DataFrame(
+        [
+            {
+                "w_rating": rating,
+                "disputes_logged": dispute_count,
+                "w_is_verified": verified,
+            }
+        ]
+    )
+
+    risk_prob = model.predict_proba(input_df)[0][1]
+
+    print(f"\n===== TRUST SHIELD DEBUG [{worker_name}] =====")
+    print(f"  w_rating         = {rating}")
+    print(f"  disputes_logged  = {dispute_count}")
+    print(f"  w_is_verified    = {verified}")
+    print(f"  input vector     = {input_df.values.tolist()[0]}")
+    print(f"  risk_probability = {risk_prob:.6f} ({round(risk_prob*100, 1)}%)")
+    print("==============================================\n")
+
+    return risk_prob
+
+
 def generate_trust_response(query: str) -> str:
     """
     Generate trust/risk assessment response using the trained ML model.
@@ -278,49 +354,70 @@ def generate_trust_response(query: str) -> str:
     Returns:
         str: HTML formatted response with risk assessment
     """
+
     try:
         df_workers = data_access.get_workers_data()
     except Exception as e:
         return f"<div class='error-box'>Database Access Error: Could not parse profiling metrics. ({e})</div>"
 
     query_lower = query.lower()
-    matched_row = None
 
-    # Find worker by name
+    # ---------------------------------------------------------------
+    # STEP 1: GENERIC RISK QUERIES (delegate to bulk filter)
+    # ---------------------------------------------------------------
+    risk_keywords = ["high risk", "low risk", "fraud", "suspicious"]
+    if any(k in query_lower for k in risk_keywords):
+        return generate_risk_filtered_response(df_workers, query_lower)
+
+    # ---------------------------------------------------------------
+    # STEP 2: MATCH WORKER BY NAME
+    # ---------------------------------------------------------------
+    matched_row = None
     for _, row in df_workers.iterrows():
         if row["w_name"].lower() in query_lower:
             matched_row = row
             break
 
-    # Worker not found
     if matched_row is None:
         return RESPONSE_WORKER_NOT_FOUND
 
     target_name = matched_row["w_name"]
     rating = matched_row["w_rating"]
     verified = matched_row["w_is_verified"]
+    worker_id = matched_row["w_id"]
 
-    # Count disputes from reports
+    # ---------------------------------------------------------------
+    # STEP 3: COUNT DISPUTES FROM REPORTS SHEET
+    # ---------------------------------------------------------------
     try:
         df_rep = data_access.get_worker_reports_data()
         disputes = int(
             df_rep[
-                (df_rep["reported_user_id"] == matched_row["w_id"])
+                (df_rep["reported_user_id"] == worker_id)
                 & (df_rep["reported_user_type"] == "Worker")
             ].shape[0]
         )
     except Exception:
         disputes = 0
 
-    # Score using model
-    import pandas as pd
-
-    model_trust_shield = models.get_trust_shield_model()
-    input_df = pd.DataFrame(
-        [{"w_rating": rating, "disputes_logged": disputes, "w_is_verified": verified}]
+    # ---------------------------------------------------------------
+    # STEP 4: CALCULATE RISK VIA SINGLE SOURCE OF TRUTH
+    # ---------------------------------------------------------------
+    risk_probability = calculate_worker_risk(
+        matched_row, disputes, worker_name=target_name
     )
-    is_blocked_pred = model_trust_shield.predict(input_df)[0]
-    risk_probability = model_trust_shield.predict_proba(input_df)[0][1]
+    model_trust_shield = models.get_trust_shield_model()
+    is_blocked_pred = model_trust_shield.predict(
+        pd.DataFrame(
+            [
+                {
+                    "w_rating": rating,
+                    "disputes_logged": disputes,
+                    "w_is_verified": verified,
+                }
+            ]
+        )
+    )[0]
 
     # Determine risk level and styling
     is_flagged = is_blocked_pred == 1 or risk_probability > TRUST_SHIELD_RISK_THRESHOLD
@@ -376,6 +473,132 @@ def generate_general_response() -> str:
         str: Markdown formatted welcome text
     """
     return RESPONSE_GENERAL
+
+
+def generate_risk_filtered_response(df_workers, query_lower):
+
+    model = models.get_trust_shield_model()
+
+    # Use actual dispute counts instead of hardcoded 0
+    dispute_counts = _get_dispute_counts()
+
+    df_workers = df_workers.copy()
+    df_workers["disputes_logged"] = (
+        df_workers["w_id"].map(dispute_counts).fillna(0).astype(int)
+    )
+
+    input_df = pd.DataFrame(
+        {
+            "w_rating": df_workers["w_rating"],
+            "disputes_logged": df_workers["disputes_logged"],
+            "w_is_verified": df_workers["w_is_verified"],
+        }
+    )
+
+    risk_probs = model.predict_proba(input_df)[:, 1]
+
+    df_workers["risk_score"] = risk_probs
+
+    # Debug: verify Amol Chandra's risk score matches individual audit
+    amol_mask = df_workers["w_name"].str.lower().str.contains("amol", na=False)
+    if amol_mask.any():
+        amol_row = df_workers[amol_mask].iloc[0]
+        print(f"\n===== DASHBOARD RISK DEBUG [Amol Chandra] =====")
+        print(f"  w_id            = {amol_row['w_id']}")
+        print(f"  w_rating        = {amol_row['w_rating']}")
+        print(f"  disputes_logged = {amol_row['disputes_logged']}")
+        print(f"  w_is_verified   = {amol_row['w_is_verified']}")
+        print(
+            f"  risk_probability = {amol_row['risk_score']:.6f} ({round(amol_row['risk_score']*100, 1)}%)"
+        )
+        print("================================================\n")
+
+    # -------------------------
+    # PROPER FILTER LOGIC
+    # -------------------------
+    if "low risk" in query_lower:
+        filtered = df_workers[df_workers["risk_score"] <= TRUST_SHIELD_RISK_THRESHOLD]
+
+    elif "high risk" in query_lower:
+        filtered = df_workers[df_workers["risk_score"] > TRUST_SHIELD_RISK_THRESHOLD]
+
+    else:
+        filtered = df_workers.sort_values(by="risk_score", ascending=False)
+
+    # -------------------------
+    # HTML OUTPUT
+    # -------------------------
+    html = """
+    <div style="
+        background: #111827;
+        padding: 12px;
+        border-radius: 10px;
+        color: #ffffff;
+        font-family: Arial;
+        margin-bottom: 10px;
+        border: 1px solid #2d3748;
+    ">
+        <h3 style="margin: 0; color: #60a5fa;">⚠️ Risk Analysis Results</h3>
+        <p style="margin: 4px 0 0; font-size: 12px; color: #cbd5e1;">
+            AI-powered worker risk profiling dashboard
+        </p>
+    </div>
+    """
+
+    for _, row in filtered.head(10).iterrows():
+
+        risk_pct = int(row["risk_score"] * 100)
+
+        if risk_pct > 70:
+            border = "#ef4444"
+            badge = "HIGH RISK"
+            bg = "#1f1f1f"
+        elif risk_pct > 40:
+            border = "#f59e0b"
+            badge = "MEDIUM RISK"
+            bg = "#1a1a1a"
+        else:
+            border = "#22c55e"
+            badge = "LOW RISK"
+            bg = "#0f172a"
+
+        html += f"""
+        <div style="
+            background: {bg};
+            border-left: 5px solid {border};
+            padding: 12px;
+            margin: 10px 0;
+            border-radius: 8px;
+            color: #e5e7eb;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+        ">
+
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <div style="font-size: 15px; font-weight: bold;">
+                    👤 {row['w_name']}
+                </div>
+
+                <div style="
+                    background:{border};
+                    color:white;
+                    padding: 3px 8px;
+                    border-radius: 6px;
+                    font-size: 11px;
+                    font-weight: bold;
+                ">
+                    {badge}
+                </div>
+            </div>
+
+            <div style="margin-top: 6px; font-size: 13px; color: #cbd5e1;">
+                ⭐ Rating: {row['w_rating']} &nbsp; | &nbsp;
+                ⚠️ Risk Score: {risk_pct}%
+            </div>
+
+        </div>
+        """
+
+    return html
 
 
 def format_response(intent: str, query: str, session_id: str = "default") -> dict:
