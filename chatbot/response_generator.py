@@ -275,6 +275,73 @@ def generate_pricing_response(query: str) -> str:
     return html_layout
 
 
+def _get_dispute_counts():
+    """
+    Load dispute (report) counts for all workers from the reports sheet.
+
+    Returns:
+        pd.Series: Indexed by w_id, values are integer dispute counts.
+    """
+    try:
+        df_rep = data_access.get_worker_reports_data()
+        counts = (
+            df_rep[df_rep["reported_user_type"] == "Worker"]
+            .groupby("reported_user_id")
+            .size()
+        )
+        return counts
+    except Exception:
+        return pd.Series(dtype=int)
+
+
+def calculate_worker_risk(worker_row, dispute_count=0, worker_name="?"):
+    """
+    Single source of truth for Trust Shield risk calculation.
+
+    Accepts a worker row (Series or dict-like) and a dispute count,
+    builds the correct 3-feature input vector, and returns the model's
+    probability of being high-risk.
+
+    Args:
+        worker_row: Must contain keys 'w_rating' and 'w_is_verified'.
+        dispute_count: Integer number of historical disputes.
+        worker_name: Optional name for debug output.
+
+    Returns:
+        float: Risk probability between 0.0 and 1.0.
+    """
+    model = models.get_trust_shield_model()
+
+    print("MODEL TYPE =", type(model))
+    print("MODEL ID =", id(model))
+    print("FEATURES EXPECTED =", model.feature_names_in_)
+
+    rating = worker_row["w_rating"]
+    verified = worker_row["w_is_verified"]
+
+    input_df = pd.DataFrame(
+        [
+            {
+                "w_rating": rating,
+                "disputes_logged": dispute_count,
+                "w_is_verified": verified,
+            }
+        ]
+    )
+
+    risk_prob = model.predict_proba(input_df)[0][1]
+
+    print(f"\n===== TRUST SHIELD DEBUG [{worker_name}] =====")
+    print(f"  w_rating         = {rating}")
+    print(f"  disputes_logged  = {dispute_count}")
+    print(f"  w_is_verified    = {verified}")
+    print(f"  input vector     = {input_df.values.tolist()[0]}")
+    print(f"  risk_probability = {risk_prob:.6f} ({round(risk_prob*100, 1)}%)")
+    print("==============================================\n")
+
+    return risk_prob
+
+
 def generate_trust_response(query: str) -> str:
     """
     Generate trust/risk assessment response using the trained ML model.
@@ -294,66 +361,63 @@ def generate_trust_response(query: str) -> str:
         return f"<div class='error-box'>Database Access Error: Could not parse profiling metrics. ({e})</div>"
 
     query_lower = query.lower()
+
+    # ---------------------------------------------------------------
+    # STEP 1: GENERIC RISK QUERIES (delegate to bulk filter)
+    # ---------------------------------------------------------------
+    risk_keywords = ["high risk", "low risk", "fraud", "suspicious"]
+    if any(k in query_lower for k in risk_keywords):
+        return generate_risk_filtered_response(df_workers, query_lower)
+
+    # ---------------------------------------------------------------
+    # STEP 2: MATCH WORKER BY NAME
+    # ---------------------------------------------------------------
     matched_row = None
-
-    query_lower = query.lower()
-
-    # -------------------------------
-    # STEP 1: CHECK IF A WORKER NAME IS PRESENT
-    # -------------------------------
-    matched_row = None
-
     for _, row in df_workers.iterrows():
         if row["w_name"].lower() in query_lower:
             matched_row = row
             break
 
-    # If a worker name is found,
-    # generate individual trust report
-    if matched_row is not None:
-        target_name = matched_row["w_name"]
-        rating = matched_row["w_rating"]
-        verified = matched_row["w_is_verified"]
-
-    # -------------------------------
-    # STEP 2: GENERIC RISK QUERIES
-    # -------------------------------
-    risk_keywords = ["high risk", "low risk", "fraud", "suspicious"]
-
-    if any(k in query_lower for k in risk_keywords):
-        return generate_risk_filtered_response(df_workers, query_lower)
-
-    # -------------------------------
-    # STEP 3: WORKER NOT FOUND
-    # -------------------------------
     if matched_row is None:
         return RESPONSE_WORKER_NOT_FOUND
 
     target_name = matched_row["w_name"]
     rating = matched_row["w_rating"]
     verified = matched_row["w_is_verified"]
+    worker_id = matched_row["w_id"]
 
-    # Count disputes from reports
+    # ---------------------------------------------------------------
+    # STEP 3: COUNT DISPUTES FROM REPORTS SHEET
+    # ---------------------------------------------------------------
     try:
         df_rep = data_access.get_worker_reports_data()
         disputes = int(
             df_rep[
-                (df_rep["reported_user_id"] == matched_row["w_id"])
+                (df_rep["reported_user_id"] == worker_id)
                 & (df_rep["reported_user_type"] == "Worker")
             ].shape[0]
         )
     except Exception:
         disputes = 0
 
-    # Score using model
-    import pandas as pd
-
-    model_trust_shield = models.get_trust_shield_model()
-    input_df = pd.DataFrame(
-        [{"w_rating": rating, "disputes_logged": disputes, "w_is_verified": verified}]
+    # ---------------------------------------------------------------
+    # STEP 4: CALCULATE RISK VIA SINGLE SOURCE OF TRUTH
+    # ---------------------------------------------------------------
+    risk_probability = calculate_worker_risk(
+        matched_row, disputes, worker_name=target_name
     )
-    is_blocked_pred = model_trust_shield.predict(input_df)[0]
-    risk_probability = model_trust_shield.predict_proba(input_df)[0][1]
+    model_trust_shield = models.get_trust_shield_model()
+    is_blocked_pred = model_trust_shield.predict(
+        pd.DataFrame(
+            [
+                {
+                    "w_rating": rating,
+                    "disputes_logged": disputes,
+                    "w_is_verified": verified,
+                }
+            ]
+        )
+    )[0]
 
     # Determine risk level and styling
     is_flagged = is_blocked_pred == 1 or risk_probability > TRUST_SHIELD_RISK_THRESHOLD
@@ -415,18 +479,39 @@ def generate_risk_filtered_response(df_workers, query_lower):
 
     model = models.get_trust_shield_model()
 
+    # Use actual dispute counts instead of hardcoded 0
+    dispute_counts = _get_dispute_counts()
+
+    df_workers = df_workers.copy()
+    df_workers["disputes_logged"] = (
+        df_workers["w_id"].map(dispute_counts).fillna(0).astype(int)
+    )
+
     input_df = pd.DataFrame(
         {
             "w_rating": df_workers["w_rating"],
-            "disputes_logged": 0,
+            "disputes_logged": df_workers["disputes_logged"],
             "w_is_verified": df_workers["w_is_verified"],
         }
     )
 
     risk_probs = model.predict_proba(input_df)[:, 1]
 
-    df_workers = df_workers.copy()
     df_workers["risk_score"] = risk_probs
+
+    # Debug: verify Amol Chandra's risk score matches individual audit
+    amol_mask = df_workers["w_name"].str.lower().str.contains("amol", na=False)
+    if amol_mask.any():
+        amol_row = df_workers[amol_mask].iloc[0]
+        print(f"\n===== DASHBOARD RISK DEBUG [Amol Chandra] =====")
+        print(f"  w_id            = {amol_row['w_id']}")
+        print(f"  w_rating        = {amol_row['w_rating']}")
+        print(f"  disputes_logged = {amol_row['disputes_logged']}")
+        print(f"  w_is_verified   = {amol_row['w_is_verified']}")
+        print(
+            f"  risk_probability = {amol_row['risk_score']:.6f} ({round(amol_row['risk_score']*100, 1)}%)"
+        )
+        print("================================================\n")
 
     # -------------------------
     # PROPER FILTER LOGIC
