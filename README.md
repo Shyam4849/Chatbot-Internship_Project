@@ -8,11 +8,11 @@ An AI-powered construction workforce and material management assistant developed
 
 HUKUM Builders AI Assistant is designed to streamline decision-making in construction operations by providing:
 
-* Worker matchmaking and recommendations
-* Material price estimation
-* Worker trust and risk assessment
-* Conversational query handling
-* Session-based chat memory
+- Worker matchmaking and recommendations
+- Material price estimation
+- Worker trust and risk assessment
+- Conversational query handling
+- Session-based chat memory
 
 The project uses traditional Machine Learning models built with Scikit-learn and operates on structured Excel datasets without relying on LLMs, Vector Databases, or RAG pipelines.
 
@@ -24,52 +24,52 @@ The project uses traditional Machine Learning models built with Scikit-learn and
 
 Recommends the most suitable workers based on:
 
-* Worker rating
-* Distance from project location
-* Verification status
-* Historical recruitment patterns
+- Worker rating
+- Distance from project location
+- Verification status
+- Historical recruitment patterns
 
 ### Dynamic Pricing Engine
 
 Predicts material pricing using:
 
-* Material category
-* Quantity
-* Logistics factors
-* Urgency requirements
-* Brand multipliers
+- Material category
+- Quantity
+- Logistics factors
+- Urgency requirements
+- Brand multipliers
 
 ### Trust Shield Risk Assessment
 
 Evaluates worker risk profiles using:
 
-* Worker rating
-* Verification status
-* Historical dispute records
+- Worker rating
+- Verification status
+- Historical dispute records
 
 Provides:
 
-* Risk Score
-* Security Clearance Status
-* Profile Audit Summary
+- Risk Score
+- Security Clearance Status
+- Profile Audit Summary
 
 ### Conversational Memory
 
 Maintains context across chat interactions:
 
-* Follow-up questions
-* Worker detail lookups
-* Session-aware responses
+- Follow-up questions
+- Worker detail lookups
+- Session-aware responses
 
 ### Intent Detection System
 
 Automatically routes user queries to the correct backend module:
 
-* Matchmaking
-* Pricing
-* Trust Shield
-* Help
-* General Queries
+- Matchmaking
+- Pricing
+- Trust Shield
+- Help
+- General Queries
 
 ---
 
@@ -77,26 +77,26 @@ Automatically routes user queries to the correct backend module:
 
 ### Frontend
 
-* Streamlit
+- Streamlit
 
 ### Backend
 
-* Python
+- Python
 
 ### Data Processing
 
-* Pandas
-* NumPy
+- Pandas
+- NumPy
 
 ### Machine Learning
 
-* Scikit-learn
-* Random Forest Classifier
-* Random Forest Regressor
+- Scikit-learn
+- Random Forest Classifier
+- Random Forest Regressor
 
 ### Storage
 
-* Excel-based datasets
+- Excel-based datasets
 
 ---
 
@@ -134,18 +134,18 @@ Chatbot-Internship_Project/
 
 Inputs:
 
-* Payment Amount
-* Worker Rating
-* Distance Delta
-* Verification Status
+- Payment Amount
+- Worker Rating
+- Distance Delta
+- Verification Status
 
 Model:
 
-* Random Forest Classifier
+- Random Forest Classifier
 
 Output:
 
-* Worker Match Probability
+- Worker Match Probability
 
 ---
 
@@ -153,18 +153,18 @@ Output:
 
 Inputs:
 
-* Material Type
-* Quantity
-* Logistics Distance
-* Urgency
+- Material Type
+- Quantity
+- Logistics Distance
+- Urgency
 
 Model:
 
-* Random Forest Regressor
+- Random Forest Regressor
 
 Output:
 
-* Predicted Material Cost
+- Predicted Material Cost
 
 ---
 
@@ -172,18 +172,18 @@ Output:
 
 Inputs:
 
-* Worker Rating
-* Historical Disputes
-* Verification Status
+- Worker Rating
+- Historical Disputes
+- Verification Status
 
 Model:
 
-* Random Forest Classifier
+- Random Forest Classifier
 
 Output:
 
-* Risk Probability
-* Security Clearance Status
+- Risk Probability
+- Security Clearance Status
 
 ---
 
@@ -245,16 +245,29 @@ streamlit run app.py
 
 ---
 
+## Known Limitation
+
+- The Dynamic Pricing Regressor currently operates on a synthetic dataset
+  containing limited variation in material categories and offered prices.
+
+- Future versions will incorporate diversified material records,
+  regional pricing factors, supplier history, and market fluctuations
+  to improve prediction accuracy.
+
+- Automated model retraining when dataset changes.
+
+---
+
 ## Future Enhancements
 
 Planned improvements include:
 
-* Multi-language support (English/Hindi)
-* Voice-based interaction
-* Advanced analytics dashboard
-* Real-time database integration
-* Payroll and workforce management modules
-* Enhanced risk profiling system
+- Multi-language support (English/Hindi)
+- Voice-based interaction
+- Advanced analytics dashboard
+- Real-time database integration
+- Payroll and workforce management modules
+- Enhanced risk profiling system
 
 ---
 
@@ -268,7 +281,7 @@ This project was developed as part of an internship focused on applying Machine 
 
 **Shyam Soni**
 
-B.Tech Computer Science Engineering
+B.Tech CSE
 Arka Jain University
 
-GitHub: https://github.com/Shyam4849
+GitHub: [Shyam4849](https://github.com/Shyam4849)
