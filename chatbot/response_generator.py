@@ -49,18 +49,15 @@ def generate_matchmaking_response(query: str, session_id: str = "default") -> st
         str: HTML formatted response with top 3 matched workers
     """
 
-    print("Matchmaking function executed")
+    df_workers = data_access.get_workers_data()
 
-    try:
-        df_workers = data_access.get_workers_data()
-        print("\n===== WORKER DF DEBUG =====")
-        print(type(df_workers))
-        print("Shape:", df_workers.shape)
-        print("Columns:", list(df_workers.columns))
-        print(df_workers.head())
-        print("===========================\n")
-    except Exception as e:
-        return f"<div class='error-box'>Database Access Error: Could not parse worker sheet. ({e})</div>"
+    if df_workers.empty:
+        return (
+            "<div style='border: 1px dashed #b0bec5; padding: 14px; background-color: #f5f7f8;"
+            "color: #37474f; border-radius: 6px;'>"
+            "🔍 <b>Database Access Error:</b> Worker data is unavailable or the data sheet is empty."
+            "</div>"
+        )
 
     # Extract profession from query
     query_lower = query.lower()
@@ -71,13 +68,22 @@ def generate_matchmaking_response(query: str, session_id: str = "default") -> st
             selected_profession = prof.capitalize()
             break
 
-    # Filter workers by profession and availability
+    # Filter workers by profession and availability (case-insensitive)
     subset = df_workers[
-        (df_workers["w_profession"] == selected_profession)
+        (df_workers["w_profession"].str.lower() == selected_profession.lower())
         & (df_workers["is_blocked"] == 0)
     ].copy()
     if subset.empty:
         subset = df_workers[df_workers["is_blocked"] == 0].copy()
+
+    if subset.empty:
+        return (
+            "<div style='border: 1px dashed #b0bec5; padding: 14px; background-color: #f5f7f8;"
+            "color: #37474f; border-radius: 6px;'>"
+            "🔍 <b>No workers available.</b><br>"
+            "All registered workers are currently blocked or the worker database is empty."
+            "</div>"
+        )
 
     # Calculate distance and payment features
     subset["distance_delta"] = np.sqrt(
@@ -91,30 +97,80 @@ def generate_matchmaking_response(query: str, session_id: str = "default") -> st
     features_input = subset[
         ["payment_amount", "w_rating", "distance_delta", "w_is_verified"]
     ].fillna(0)
-    probabilities = model_matchmaker.predict_proba(features_input)[:, 1]
+
+    # === MATCHMAKER INFERENCE DIAGNOSTICS ===
+    # logging.error("===== MATCHMAKING INFERENCE DIAGNOSTICS =====")
+    # logging.error(f"Matchmaker model id = {id(model_matchmaker)}")
+    # logging.error(f"Subset shape (workers to score): {subset.shape}")
+    # logging.error(f"features_input dtypes:\n{features_input.dtypes.to_string()}")
+    # logging.error(f"features_input (all rows):\n{features_input.to_string()}")
+    # logging.error(
+    #     f"payment_amount unique values: {sorted(features_input['payment_amount'].unique().tolist())}"
+    # )
+    # logging.error(
+    #     f"w_rating unique values: {sorted(features_input['w_rating'].unique().tolist())}"
+    # )
+    # logging.error(
+    #     f"distance_delta unique values: {sorted(features_input['distance_delta'].unique().tolist())}"
+    # )
+    # logging.error(
+    #     f"w_is_verified unique values: {sorted(features_input['w_is_verified'].unique().tolist())}"
+    # )
+    # logging.error("================================================")
 
     probabilities = model_matchmaker.predict_proba(features_input)[:, 1]
 
-    # random shit
-    print("\n===== MATCH DEBUG =====")
-    print(probabilities[:10])
-    print("MIN =", probabilities.min())
-    print("MAX =", probabilities.max())
-    print("=======================\n")
+    # === RAW PROBABILITIES DIAGNOSTICS ===
+    # logging.error("===== RAW PROBABILITIES =====")
+    # logging.error(f"RAW PROBABILITIES = {probabilities.tolist()}")
+    # logging.error(f"MIN = {probabilities.min()}")
+    # logging.error(f"MAX = {probabilities.max()}")
+    # logging.error(f"MEAN = {probabilities.mean()}")
+    # logging.error(f"STD = {probabilities.std()}")
+    # logging.error(f"UNIQUE VALUES = {np.unique(probabilities).tolist()}")
+    # logging.error(f"ALL SAME? = {len(np.unique(probabilities)) == 1}")
+    # logging.error("==============================")
 
-    # Store raw probabilities for debugging
-    logging.debug(f"Raw match probabilities: {probabilities}")
+    # logging.debug(f"Raw match probabilities: {probabilities}")
+
     # Normalize scores to 0-1 range to avoid rounding all to 100%
-    prob_min = probabilities.min()
-    prob_max = probabilities.max()
-    if prob_max > prob_min:
-        norm_scores = (probabilities - prob_min) / (prob_max - prob_min)
+    subset["raw_probability"] = probabilities
+
+    logging.error(f"Workers with prob=1.0 = {(subset['raw_probability'] == 1.0).sum()}")
+
+    # Create a composite score using ML prediction + rating + verification
+
+    subset["match_probability"] = (
+        subset["raw_probability"] * 0.7
+        + (subset["w_rating"] / 5.0) * 0.2
+        + subset["w_is_verified"] * 0.1
+    )
+
+    # Normalizing the score to 0-1
+    min_score = subset["match_probability"].min()
+    max_score = subset["match_probability"].max()
+
+    if max_score > min_score:
+        subset["match_probability"] = (subset["match_probability"] - min_score) / (
+            max_score - min_score
+        )
     else:
-        norm_scores = np.zeros_like(probabilities)
-    subset["match_probability"] = norm_scores
+        subset["match_probability"] = 1.0
+
+    # === NORMALIZED SCORES DIAGNOSTICS ===
+    # logging.error("===== NORMALIZED SCORES =====")
+    # logging.error(f"prob_min = {prob_min}")
+    # logging.error(f"prob_max = {prob_max}")
+    # logging.error(f"Normalization branch: {'min-max scaling' if prob_max > prob_min else 'all zeros (identical probs)'}")
+    # logging.error(f"NORMALIZED SCORES = {norm_scores.tolist()}")
+    # logging.error(f"Top 3 match_probability values: {subset.sort_values(by='match_probability', ascending=False).head(3)['match_probability'].tolist()}")
+    # logging.error("==============================")
 
     # Get top 3 matches
-    top_matches = subset.sort_values(by="match_probability", ascending=False).head(3)
+    top_matches = subset.sort_values(
+        by=["raw_probability", "w_rating", "distance_delta", "w_is_verified"],
+        ascending=[False, False, True, False],
+    ).head(3)
 
     # Store context for follow-up detection
     from . import memory_manager
@@ -201,8 +257,15 @@ def generate_pricing_response(query: str) -> str:
             break
 
     # Get pricing features and model
-    model_pricing = models.get_pricing_model()
-    model_pricing_columns = models.get_pricing_columns()
+    try:
+        model_pricing = models.get_pricing_model()
+        model_pricing_columns = models.get_pricing_columns()
+    except Exception as e:
+        return (
+            f"<div style='border: 1px dashed #b0bec5; padding: 14px; "
+            f"background-color: #f5f7f8; color: #37474f; border-radius: 6px;'>"
+            f"⚠️ <b>Pricing Model Error:</b> Could not load pricing model. ({e})</div>"
+        )
 
     # Match material category
     target_column = None
@@ -242,10 +305,15 @@ def generate_pricing_response(query: str) -> str:
             input_row["mr_urgency_High"] = [1]
 
     # Predict price
-    import pandas as pd
-
-    df_inference = pd.DataFrame(input_row)[model_pricing_columns]
-    predicted_base = model_pricing.predict(df_inference)[0]
+    try:
+        df_inference = pd.DataFrame(input_row)[model_pricing_columns]
+        predicted_base = model_pricing.predict(df_inference)[0]
+    except Exception as e:
+        return (
+            f"<div style='border: 1px dashed #b0bec5; padding: 14px; "
+            f"background-color: #f5f7f8; color: #37474f; border-radius: 6px;'>"
+            f"⚠️ <b>Pricing Inference Error:</b> Model prediction failed. ({e})</div>"
+        )
 
     # Apply brand multiplier
     brand_multiplier = PRICING_BRAND_MULTIPLIERS.get(detected_brand, 1.0)
@@ -312,9 +380,8 @@ def calculate_worker_risk(worker_row, dispute_count=0, worker_name="?"):
     """
     model = models.get_trust_shield_model()
 
-    print("MODEL TYPE =", type(model))
-    print("MODEL ID =", id(model))
-    print("FEATURES EXPECTED =", model.feature_names_in_)
+    logging.debug(f"Trust Shield model type: {type(model)}, id: {id(model)}")
+    logging.debug(f"Trust Shield features expected: {model.feature_names_in_}")
 
     rating = worker_row["w_rating"]
     verified = worker_row["w_is_verified"]
@@ -327,17 +394,14 @@ def calculate_worker_risk(worker_row, dispute_count=0, worker_name="?"):
                 "w_is_verified": verified,
             }
         ]
-    )
+    ).fillna(0)
 
     risk_prob = model.predict_proba(input_df)[0][1]
 
-    print(f"\n===== TRUST SHIELD DEBUG [{worker_name}] =====")
-    print(f"  w_rating         = {rating}")
-    print(f"  disputes_logged  = {dispute_count}")
-    print(f"  w_is_verified    = {verified}")
-    print(f"  input vector     = {input_df.values.tolist()[0]}")
-    print(f"  risk_probability = {risk_prob:.6f} ({round(risk_prob*100, 1)}%)")
-    print("==============================================\n")
+    logging.debug(
+        f"Trust Shield [{worker_name}]: rating={rating}, disputes={dispute_count}, "
+        f"verified={verified}, risk={risk_prob:.6f} ({round(risk_prob*100, 1)}%)"
+    )
 
     return risk_prob
 
@@ -355,10 +419,15 @@ def generate_trust_response(query: str) -> str:
         str: HTML formatted response with risk assessment
     """
 
-    try:
-        df_workers = data_access.get_workers_data()
-    except Exception as e:
-        return f"<div class='error-box'>Database Access Error: Could not parse profiling metrics. ({e})</div>"
+    df_workers = data_access.get_workers_data()
+
+    if df_workers.empty:
+        return (
+            "<div style='border: 1px dashed #b0bec5; padding: 14px; background-color: #f5f7f8;"
+            "color: #37474f; border-radius: 6px;'>"
+            "🔍 <b>Database Access Error:</b> Worker data is unavailable or the data sheet is empty."
+            "</div>"
+        )
 
     query_lower = query.lower()
 
@@ -406,18 +475,7 @@ def generate_trust_response(query: str) -> str:
     risk_probability = calculate_worker_risk(
         matched_row, disputes, worker_name=target_name
     )
-    model_trust_shield = models.get_trust_shield_model()
-    is_blocked_pred = model_trust_shield.predict(
-        pd.DataFrame(
-            [
-                {
-                    "w_rating": rating,
-                    "disputes_logged": disputes,
-                    "w_is_verified": verified,
-                }
-            ]
-        )
-    )[0]
+    is_blocked_pred = 1 if risk_probability > TRUST_SHIELD_RISK_THRESHOLD else 0
 
     # Determine risk level and styling
     is_flagged = is_blocked_pred == 1 or risk_probability > TRUST_SHIELD_RISK_THRESHOLD
@@ -493,25 +551,22 @@ def generate_risk_filtered_response(df_workers, query_lower):
             "disputes_logged": df_workers["disputes_logged"],
             "w_is_verified": df_workers["w_is_verified"],
         }
-    )
+    ).fillna(0)
 
     risk_probs = model.predict_proba(input_df)[:, 1]
 
     df_workers["risk_score"] = risk_probs
 
-    # Debug: verify Amol Chandra's risk score matches individual audit
+    # Debug: log Amol Chandra's risk score for verification
     amol_mask = df_workers["w_name"].str.lower().str.contains("amol", na=False)
     if amol_mask.any():
         amol_row = df_workers[amol_mask].iloc[0]
-        print(f"\n===== DASHBOARD RISK DEBUG [Amol Chandra] =====")
-        print(f"  w_id            = {amol_row['w_id']}")
-        print(f"  w_rating        = {amol_row['w_rating']}")
-        print(f"  disputes_logged = {amol_row['disputes_logged']}")
-        print(f"  w_is_verified   = {amol_row['w_is_verified']}")
-        print(
-            f"  risk_probability = {amol_row['risk_score']:.6f} ({round(amol_row['risk_score']*100, 1)}%)"
+        logging.debug(
+            f"Dashboard Risk [Amol Chandra]: w_id={amol_row['w_id']}, "
+            f"rating={amol_row['w_rating']}, disputes={amol_row['disputes_logged']}, "
+            f"verified={amol_row['w_is_verified']}, "
+            f"risk={amol_row['risk_score']:.6f} ({round(amol_row['risk_score']*100, 1)}%)"
         )
-        print("================================================\n")
 
     # -------------------------
     # PROPER FILTER LOGIC
@@ -524,6 +579,16 @@ def generate_risk_filtered_response(df_workers, query_lower):
 
     else:
         filtered = df_workers.sort_values(by="risk_score", ascending=False)
+
+    if filtered.empty:
+        return (
+            "<div style='background: #111827; padding: 12px; border-radius: 10px; "
+            "color: #ffffff; font-family: Arial; margin-bottom: 10px; "
+            "border: 1px solid #2d3748;'>"
+            "<h3 style='margin: 0; color: #60a5fa;'>⚠️ Risk Analysis Results</h3>"
+            "<p style='margin: 4px 0 0; font-size: 13px; color: #cbd5e1;'>"
+            "No workers matched the requested risk filter.</p></div>"
+        )
 
     # -------------------------
     # HTML OUTPUT

@@ -55,9 +55,40 @@ def _train_models():
         y_m1 = m1_df["is_success"]
 
         m1_model = RandomForestClassifier(
-            class_weight="balanced", random_state=42, n_estimators=50
+            class_weight="balanced", random_state=42, n_estimators=300
         )
         m1_model.fit(X_m1, y_m1)
+
+        # === MATCHMAKER TRAINING DIAGNOSTICS ===
+        print("\n===== MATCHMAKER TRAINING DIAGNOSTICS =====")
+        print(f"m1_df.shape = {m1_df.shape}")
+        print(f"\nTarget distribution (is_success):")
+        print(m1_df["is_success"].value_counts().to_string())
+        print(f"\nFeature summary:")
+        print(
+            m1_df[["payment_amount", "w_rating", "distance_delta", "w_is_verified"]]
+            .describe()
+            .to_string()
+        )
+        print(f"\nFeature importances:")
+        for fname, fimp in zip(features_m1, m1_model.feature_importances_):
+            print(f"  {fname}: {fimp:.6f}")
+        print(f"\nModel classes: {m1_model.classes_}")
+        print(f"Training samples: {len(X_m1)}")
+        print(
+            f"Unique payment_amount values in training: {sorted(X_m1['payment_amount'].unique().tolist())}"
+        )
+        print(
+            f"Unique w_is_verified values in training: {sorted(X_m1['w_is_verified'].unique().tolist())}"
+        )
+        print(
+            f"distance_delta range: [{X_m1['distance_delta'].min():.6f}, {X_m1['distance_delta'].max():.6f}]"
+        )
+        print(
+            f"w_rating range: [{X_m1['w_rating'].min():.6f}, {X_m1['w_rating'].max():.6f}]"
+        )
+        print("============================================\n")
+
         joblib.dump(m1_model, PATH_MODEL_MATCHMAKING)
         print(" -> [Success]: Trained and exported Matchmaker Engine Model.")
     except Exception as e:

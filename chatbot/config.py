@@ -169,7 +169,7 @@ PRICING_BRAND_MULTIPLIERS = {
     "AMBUJA": 1.04,
 }
 
-TRUST_SHIELD_RISK_THRESHOLD = 0.45
+TRUST_SHIELD_RISK_THRESHOLD = 0.70
 
 # =====================================================================
 # UI CONSTANTS
