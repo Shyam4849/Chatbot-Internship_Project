@@ -19,9 +19,7 @@ from .config import (
 )
 from . import data_access
 
-# =====================================================================
-# GLOBAL MODEL OBJECTS (CACHED AT MODULE IMPORT)
-# =====================================================================
+
 
 _models = {}
 _models_loaded = False

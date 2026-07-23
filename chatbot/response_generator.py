@@ -157,14 +157,6 @@ def generate_matchmaking_response(query: str, session_id: str = "default") -> st
     else:
         subset["match_probability"] = 1.0
 
-    # === NORMALIZED SCORES DIAGNOSTICS ===
-    # logging.error("===== NORMALIZED SCORES =====")
-    # logging.error(f"prob_min = {prob_min}")
-    # logging.error(f"prob_max = {prob_max}")
-    # logging.error(f"Normalization branch: {'min-max scaling' if prob_max > prob_min else 'all zeros (identical probs)'}")
-    # logging.error(f"NORMALIZED SCORES = {norm_scores.tolist()}")
-    # logging.error(f"Top 3 match_probability values: {subset.sort_values(by='match_probability', ascending=False).head(3)['match_probability'].tolist()}")
-    # logging.error("==============================")
 
     # Get top 3 matches
     top_matches = subset.sort_values(
