@@ -179,8 +179,7 @@ def process_follow_up(query: str, session_id: str) -> dict:
         """
         return {"intent": "matchmaking", "response": response, "is_html": True}
 
-    # -------------------------------------------------------------------------
-    # WORKER FIRST
+
     # -------------------------------------------------------------------------
     if follow_up_type == "worker_first":
         workers = context.get("recommended_workers", [])
