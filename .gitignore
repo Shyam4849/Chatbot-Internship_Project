@@ -14,7 +14,7 @@ chatbot_logs.txt
 
 .streamlit/
 
-*.pkl
+
 
 *.log
 
